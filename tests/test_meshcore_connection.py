@@ -130,3 +130,57 @@ async def test_advert_scheduler_started_by_default():
                AsyncMock(return_value=make_mc())):
         await engine.start_meshcore()
     assert len(engine.scheds) == 1
+
+
+# ------------------------------------------------------------
+# ignore_commands
+# ------------------------------------------------------------
+
+def make_router(mc_config):
+    from citadel.transport.engines.meshcore.message_router import MessageRouter
+    config = SimpleNamespace(transport={"meshcore": mc_config})
+    dedupe = MagicMock()
+    dedupe.is_duplicate = AsyncMock(return_value=False)
+    session_mgr = MagicMock()
+    session_mgr.get_session_by_node_id = MagicMock(return_value=None)
+    router = MessageRouter(config, None, session_mgr, MagicMock(), dedupe,
+                           MagicMock(), MagicMock())
+    return router, session_mgr, dedupe
+
+
+def dm(text):
+    return SimpleNamespace(payload={"pubkey_prefix": "4242d01aa7a1",
+                                    "text": text, "sender_timestamp": 1})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["status", " STATUS ", "Status"])
+async def test_ignored_command_is_not_answered(text):
+    router, session_mgr, dedupe = make_router(
+        {"ignore_commands": ["status"]})
+    await router._process_mc_message_safe(dm(text))
+    session_mgr.create_session.assert_not_called()
+    dedupe.is_duplicate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_other_messages_are_still_handled():
+    router, session_mgr, dedupe = make_router(
+        {"ignore_commands": ["status"]})
+    router._start_bbs_listener_func = AsyncMock()
+    # stop processing right after session creation
+    router.node_auth.node_has_password_cache = AsyncMock(
+        side_effect=RuntimeError("stop"))
+    await router._process_mc_message_safe(dm("status please"))
+    dedupe.is_duplicate.assert_awaited_once()
+    session_mgr.create_session.assert_called_once_with("4242d01aa7a1")
+
+
+@pytest.mark.asyncio
+async def test_no_ignore_commands_by_default():
+    router, session_mgr, dedupe = make_router({})
+    router._start_bbs_listener_func = AsyncMock()
+    router.node_auth.node_has_password_cache = AsyncMock(
+        side_effect=RuntimeError("stop"))
+    await router._process_mc_message_safe(dm("status"))
+    session_mgr.create_session.assert_called_once()

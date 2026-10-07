@@ -185,6 +185,18 @@ name and multi-acks alone. This matters when the node is shared: the
 BBS would otherwise rename it and reconfigure the radio on every start.
 `advert_interval: 0` turns off the BBS's own adverts.
 
+Every app on a shared node receives every incoming DM. If another app
+answers its own DM commands (say a home automation system answering
+`status`), list them in `ignore_commands` and the BBS leaves those
+messages alone. The match is on the whole message, case-insensitive:
+
+```yaml
+    ignore_commands: ["status"]
+```
+
+A `Dockerfile` is included. Mount a directory holding `config.yaml` at
+`/data` and set `database.db_path` to a file in `/data`.
+
 Note that the BBS adds every companion it hears an advert from to the
 node's contact list, and removes the oldest one when
 `max_device_contacts` is reached. On a shared node that can also remove

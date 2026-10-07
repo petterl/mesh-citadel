@@ -44,6 +44,14 @@ class MessageRouter:
         self._start_bbs_listener_func = start_bbs_listener_func
         self._start_login_workflow_func = start_login_workflow_func
 
+    def _is_ignored_command(self, text) -> bool:
+        """True if the whole message matches an entry in the
+        'ignore_commands' setting (case-insensitive)."""
+        ignored = self.mc_config.get("ignore_commands") or []
+        normalized = text.strip().casefold()
+        return any(normalized == str(cmd).strip().casefold()
+                   for cmd in ignored)
+
     async def handle_mc_message(self, event):
         """Handle incoming messages with comprehensive exception protection."""
         try:
@@ -82,6 +90,14 @@ class MessageRouter:
         except (KeyError, AttributeError, TypeError) as e:
             log.error(
                 f"Malformed message event - missing required fields: {e}")
+            return
+
+        # On a node shared with other apps (e.g. through a mux), every
+        # incoming DM reaches every app. Leave commands that belong to
+        # another app to that app instead of answering them too.
+        if self._is_ignored_command(text):
+            log.info(f"Ignoring '{text.strip()}' from {node_id} "
+                     "(listed in ignore_commands)")
             return
 
         # Check for duplicates with error handling

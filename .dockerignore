@@ -1,0 +1,8 @@
+.git
+.github
+.mesh-citadel
+**/__pycache__
+*.db
+*.log
+tmp
+docs

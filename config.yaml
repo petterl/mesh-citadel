@@ -67,6 +67,10 @@ transport:
     # clients (e.g. through a mux) and should keep its own settings.
     configure_node: true
 
+    # DMs that exactly match one of these (case-insensitive) are left
+    # unanswered, for commands handled by another app on a shared node
+    ignore_commands: []
+
     frequency: 910.525                # MHz
     bandwidth: 62.5                   # kHz
     spreading_factor: 7
