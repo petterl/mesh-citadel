@@ -54,8 +54,18 @@ auth:
 transport:
   meshcore:                           # any change to mc requires restart
     <<: *system                       # import the system name
-    serial_port: "/dev/ttyACM0"
+    connection: "serial"              # "serial" (USB) or "tcp"
+    serial_port: "/dev/ttyACM0"       # used when connection: serial
     baud_rate: 115200
+    # tcp_host: "192.168.1.66"        # used when connection: tcp, e.g. a
+    # tcp_port: 5000                  # meshcore-proxy or meshcore-mux port
+    # auto_reconnect: true            # reconnect if the TCP link drops
+    # max_reconnect_attempts: 3
+
+    # Push the radio settings, tx_power, name and multi_acks below to the
+    # node at startup. Set to false when the node is shared with other
+    # clients (e.g. through a mux) and should keep its own settings.
+    configure_node: true
 
     frequency: 910.525                # MHz
     bandwidth: 62.5                   # kHz
@@ -67,7 +77,7 @@ transport:
     watchdog_reset: 30                # this should always be smaller than 
                                       # the timeout
 
-    advert_interval: 8                # hours
+    advert_interval: 8                # hours, 0 disables BBS adverts
     flood_advert: true                # should BBS adverts flood
 
     max_retries: 5                    # max total retries, flood and path

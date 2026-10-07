@@ -161,6 +161,35 @@ to get a _lot_ more logs.  It sends an advert on startup, and you can't
 DM with it until it sees your advert, so you will have to advert before
 it'll respond.
 
+## Connecting over TCP
+
+Instead of a USB serial port, the BBS can reach the companion node over
+TCP, for example through
+[meshcore-proxy](https://github.com/rgregg/meshcore-proxy) (serial to
+TCP) or a meshcore-mux that shares one node between several clients:
+
+```yaml
+transport:
+  meshcore:
+    connection: "tcp"
+    tcp_host: "192.168.1.66"
+    tcp_port: 5003
+    auto_reconnect: true
+    configure_node: false   # keep the node's own radio settings and name
+    advert_interval: 0      # let the node's owner decide when to advert
+```
+
+With `configure_node: false` the BBS only syncs the node clock and
+leaves frequency, bandwidth, spreading factor, coding rate, TX power,
+name and multi-acks alone. This matters when the node is shared: the
+BBS would otherwise rename it and reconfigure the radio on every start.
+`advert_interval: 0` turns off the BBS's own adverts.
+
+Note that the BBS adds every companion it hears an advert from to the
+node's contact list, and removes the oldest one when
+`max_device_contacts` is reached. On a shared node that can also remove
+contacts that other clients rely on.
+
 If you have it running locally, you can run the `cli_client.py` script
 to get a local console that's a little bit like a MeshCore connection.
 

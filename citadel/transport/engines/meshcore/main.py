@@ -162,30 +162,7 @@ class MeshCoreTransportEngine:
         """Initialize and start the MeshCore connection."""
         mc_config = self.mc_config
 
-        serial_port = mc_config.get("serial_port", "/dev/ttyUSB0")
-        baud_rate = mc_config.get("baud_rate", 115200)
-
-        # Radio settings default to US Recommended settings, if not otherwise set in config
-        frequency = mc_config.get("frequency", 910.525)
-        bandwidth = mc_config.get("bandwidth", 62.5)
-        spreading_factor = mc_config.get("spreading_factor", 7)
-        coding_rate = mc_config.get("coding_rate", 5)
-        tx_power = mc_config.get("tx_power", 22)
-        node_name = mc_config.get("name", "Mesh-Citadel BBS")
-        multi_acks = mc_config.get("multi_acks", True)
-
-        log.info(f"Connecting MeshCore transport at {serial_port}")
-        debug = False
-        if log.getEffectiveLevel() <= logging.DEBUG:
-            debug = True
-        try:
-            mc = await MeshCore.create_serial(serial_port,
-                                              baud_rate,
-                                              debug=debug)
-        except SerialException as err:
-            log.error(f"Unable to connect to MeshCore node hardware: {err}")
-            log.error(f"Giving up on MeshCore connection")
-            return
+        mc = await self._connect_meshcore()
 
         # Set node time
         now = int(time.time())
@@ -196,6 +173,96 @@ class MeshCoreTransportEngine:
             log.warning(f"Unable to sync time: {result.payload}")
             log.warning("Node may not be communicating correctly")
             log.warning("Ensure node has USB companion firmware loaded")
+
+        # A node shared with other clients (e.g. through a TCP mux) should
+        # keep its own radio settings and name, so this can be turned off
+        if mc_config.get("configure_node", True):
+            await self._configure_node(mc)
+        else:
+            log.info("configure_node is off, leaving node radio settings "
+                     "and name unchanged")
+
+        # Ensure contacts
+        log.info("Ensuring contacts")
+        result = await mc.ensure_contacts()
+        if not result:
+            raise TransportError(
+                f"Unable to ensure contacts: {result.payload}")
+
+        # Set up adverts, one right now, then every N hours (config.yaml).
+        # advert_interval: 0 disables adverts from the BBS entirely.
+        if mc_config.get("advert_interval", 6) > 0:
+            scheduler = AdvertScheduler(self.config, mc)
+            self.scheds.append(scheduler)
+            self.tasks.append(
+                self._create_monitored_task(
+                    scheduler.interval_advert(),
+                    f"advert_scheduler_{len(self.scheds)}"
+                )
+            )
+        else:
+            log.info("advert_interval is 0, not sending adverts")
+
+        self.meshcore = mc
+
+    async def _connect_meshcore(self):
+        """Open the connection to the MeshCore node, over USB serial or
+        TCP depending on the 'connection' setting."""
+        mc_config = self.mc_config
+        from citadel.transport.manager import TransportError
+
+        debug = False
+        if log.getEffectiveLevel() <= logging.DEBUG:
+            debug = True
+
+        connection = mc_config.get("connection", "serial")
+        try:
+            if connection == "tcp":
+                tcp_host = mc_config.get("tcp_host")
+                tcp_port = mc_config.get("tcp_port", 5000)
+                if not tcp_host:
+                    raise TransportError(
+                        "connection is 'tcp' but no tcp_host is set")
+                log.info("Connecting MeshCore transport at "
+                         f"tcp://{tcp_host}:{tcp_port}")
+                return await MeshCore.create_tcp(
+                    tcp_host,
+                    tcp_port,
+                    debug=debug,
+                    auto_reconnect=mc_config.get("auto_reconnect", True),
+                    max_reconnect_attempts=mc_config.get(
+                        "max_reconnect_attempts", 3)
+                )
+            if connection == "serial":
+                serial_port = mc_config.get("serial_port", "/dev/ttyUSB0")
+                baud_rate = mc_config.get("baud_rate", 115200)
+                log.info(f"Connecting MeshCore transport at {serial_port}")
+                return await MeshCore.create_serial(serial_port,
+                                                    baud_rate,
+                                                    debug=debug)
+        except (SerialException, OSError) as err:
+            # ConnectionError (refused, reset, etc.) is an OSError
+            log.error(f"Unable to connect to MeshCore node: {err}")
+            raise TransportError(
+                f"Unable to connect to MeshCore node: {err}") from err
+        raise TransportError(
+            f"Unknown MeshCore connection type '{connection}', "
+            "expected 'serial' or 'tcp'")
+
+    async def _configure_node(self, mc):
+        """Push radio parameters, TX power, name and multi-acks from
+        config.yaml to the node."""
+        mc_config = self.mc_config
+        from citadel.transport.manager import TransportError
+
+        # Radio settings default to US Recommended settings, if not otherwise set in config
+        frequency = mc_config.get("frequency", 910.525)
+        bandwidth = mc_config.get("bandwidth", 62.5)
+        spreading_factor = mc_config.get("spreading_factor", 7)
+        coding_rate = mc_config.get("coding_rate", 5)
+        tx_power = mc_config.get("tx_power", 22)
+        node_name = mc_config.get("name", "Mesh-Citadel BBS")
+        multi_acks = mc_config.get("multi_acks", True)
 
         # Configure radio parameters
         log.info(f"Setting MeshCore frequency to {frequency} MHz")
@@ -231,25 +298,6 @@ class MeshCoreTransportEngine:
             if result.type == EventType.ERROR:
                 raise TransportError(
                     f"Unable to set multi-acks: {result.payload}")
-
-        # Ensure contacts
-        log.info("Ensuring contacts")
-        result = await mc.ensure_contacts()
-        if not result:
-            raise TransportError(
-                f"Unable to ensure contacts: {result.payload}")
-
-        # Set up adverts, one right now, then every N hours (config.yaml)
-        scheduler = AdvertScheduler(self.config, mc)
-        self.scheds.append(scheduler)
-        self.tasks.append(
-            self._create_monitored_task(
-                scheduler.interval_advert(),
-                f"advert_scheduler_{len(self.scheds)}"
-            )
-        )
-
-        self.meshcore = mc
 
     async def stop(self):
         """Stop the transport engine and clean up all resources."""
